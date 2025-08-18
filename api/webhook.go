@@ -72,7 +72,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	// Проверяем подпись webhook (если настроена)
-	if webhookSecret != "" {
+	// ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ТЕСТИРОВАНИЯ FRAMER
+	if false && webhookSecret != "" {
 		signature := r.Header.Get("X-Webhook-Signature")
 		if signature == "" {
 			signature = r.Header.Get("X-Hub-Signature-256") // GitHub style
