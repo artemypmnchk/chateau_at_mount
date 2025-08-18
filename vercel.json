@@ -17,11 +17,6 @@
       "dest": "/api/status.go"
     }
   ],
-  "env": {
-    "TELEGRAM_TOKEN": "@telegram_token",
-    "WEBHOOK_SECRET": "@webhook_secret",
-    "DEFAULT_CHANNEL_ID": "@default_channel_id"
-  },
   "build": {
     "env": {
       "GO_VERSION": "1.21"
