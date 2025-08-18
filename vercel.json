@@ -1,0 +1,30 @@
+{
+  "functions": {
+    "api/webhook.go": {
+      "runtime": "@vercel/go"
+    },
+    "api/status.go": {
+      "runtime": "@vercel/go"
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/webhook",
+      "dest": "/api/webhook.go"
+    },
+    {
+      "src": "/api/status",
+      "dest": "/api/status.go"
+    }
+  ],
+  "env": {
+    "TELEGRAM_TOKEN": "@telegram_token",
+    "WEBHOOK_SECRET": "@webhook_secret",
+    "DEFAULT_CHANNEL_ID": "@default_channel_id"
+  },
+  "build": {
+    "env": {
+      "GO_VERSION": "1.21"
+    }
+  }
+} 
