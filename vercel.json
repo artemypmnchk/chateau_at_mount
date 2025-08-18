@@ -1,25 +1,12 @@
 {
-  "functions": {
-    "api/webhook.go": {
-      "runtime": "@vercel/go"
-    },
-    "api/status.go": {
-      "runtime": "@vercel/go"
-    }
-  },
   "routes": [
     {
       "src": "/api/webhook",
       "dest": "/api/webhook.go"
     },
     {
-      "src": "/api/status",
+      "src": "/api/status", 
       "dest": "/api/status.go"
     }
-  ],
-  "build": {
-    "env": {
-      "GO_VERSION": "1.21"
-    }
-  }
+  ]
 } 
