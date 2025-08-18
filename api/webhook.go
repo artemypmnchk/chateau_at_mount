@@ -1,20 +1,23 @@
 package handler
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"chateau-bot/pkg/config"
-	"chateau-bot/pkg/message"
-	"chateau-bot/pkg/security"
-	"chateau-bot/pkg/telegram"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Handler обрабатывает webhook запросы для Vercel с улучшенной безопасностью
+// Handler обрабатывает webhook запросы для Vercel
 func Handler(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	
@@ -23,13 +26,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
 	w.Header().Set("Content-Type", "application/json")
-
-	// Ограниченные CORS заголовки
 	w.Header().Set("Access-Control-Allow-Methods", "POST")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Webhook-Signature")
-	w.Header().Set("Access-Control-Max-Age", "3600")
 
-	// Обрабатываем OPTIONS запрос для CORS
+	// Обрабатываем OPTIONS запрос
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -42,32 +42,20 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Загружаем конфигурацию
-	cfg, err := config.Load()
-	if err != nil {
-		log.Printf("Security: Failed to load config: %v", err)
-		http.Error(w, `{"error":"Configuration error"}`, http.StatusInternalServerError)
-		return
-	}
+	// Получаем переменные окружения
+	telegramToken := os.Getenv("TELEGRAM_TOKEN")
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+	channelID := os.Getenv("DEFAULT_CHANNEL_ID")
 
-	// Проверяем наличие токена
-	if cfg.TelegramToken == "" {
+	if telegramToken == "" {
 		log.Printf("Security: Telegram token not configured")
 		http.Error(w, `{"error":"Bot not configured"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// Создаем валидатор безопасности
-	validator := security.NewValidator(security.SecurityConfig{
-		WebhookSecret:  cfg.WebhookSecret,
-		RequireHTTPS:   true,
-		MaxPayloadSize: 1024 * 1024, // 1MB
-	})
-
-	// Валидируем запрос
-	if err := validator.ValidateRequest(r); err != nil {
-		log.Printf("Security: Request validation failed from %s: %v", getClientIP(r), err)
-		http.Error(w, `{"error":"Request validation failed"}`, http.StatusBadRequest)
+	if channelID == "" {
+		log.Printf("Error: No channel configured")
+		http.Error(w, `{"error":"No channel configured"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -84,23 +72,25 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	// Проверяем подпись webhook (если настроена)
-	signature := r.Header.Get("X-Webhook-Signature")
-	if signature == "" {
-		signature = r.Header.Get("X-Hub-Signature-256") // GitHub style
-	}
-	
-	if err := validator.ValidateWebhookSignature(body, signature); err != nil {
-		log.Printf("Security: Invalid webhook signature from %s: %v", getClientIP(r), err)
-		http.Error(w, `{"error":"Invalid signature"}`, http.StatusUnauthorized)
-		return
+	if webhookSecret != "" {
+		signature := r.Header.Get("X-Webhook-Signature")
+		if signature == "" {
+			signature = r.Header.Get("X-Hub-Signature-256") // GitHub style
+		}
+		
+		if err := validateWebhookSignature(body, signature, webhookSecret); err != nil {
+			log.Printf("Security: Invalid webhook signature from %s: %v", getClientIP(r), err)
+			http.Error(w, `{"error":"Invalid signature"}`, http.StatusUnauthorized)
+			return
+		}
 	}
 
 	// Логируем безопасно (маскируем чувствительные данные)
-	sanitizedBody := validator.SanitizeLogData(string(body))
+	sanitizedBody := sanitizeLogData(string(body))
 	log.Printf("Webhook received from %s (size: %d bytes): %s", getClientIP(r), len(body), sanitizedBody)
 
 	// Создаем Telegram клиент
-	tgClient, err := telegram.NewClient(cfg.TelegramToken)
+	bot, err := tgbotapi.NewBotAPI(telegramToken)
 	if err != nil {
 		log.Printf("Error: Failed to create Telegram client: %v", err)
 		http.Error(w, `{"error":"Telegram client error"}`, http.StatusInternalServerError)
@@ -108,30 +98,22 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Обрабатываем сообщение
-	processor := message.NewProcessor()
-	messageText, err := processor.ProcessWebhook(body)
-	if err != nil {
-		log.Printf("Warning: Failed to process webhook: %v", err)
-		messageText = processor.CreateErrorMessage(err)
-	}
+	messageText := processWebhook(body)
 
-	// Получаем ID канала для отправки
-	channelID, err := cfg.GetChannelIDInt64()
+	// Конвертируем ID канала в int64
+	channelIDInt, err := strconv.ParseInt(channelID, 10, 64)
 	if err != nil {
 		log.Printf("Error: Failed to parse channel ID: %v", err)
 		http.Error(w, `{"error":"Invalid channel configuration"}`, http.StatusInternalServerError)
 		return
 	}
 
-	if channelID == 0 {
-		log.Printf("Error: No channel configured")
-		http.Error(w, `{"error":"No channel configured"}`, http.StatusInternalServerError)
-		return
-	}
-
 	// Отправляем сообщение в Telegram
-	if err := tgClient.SendMessage(channelID, messageText); err != nil {
-		log.Printf("Error: Failed to send message to channel %d: %v", channelID, err)
+	msg := tgbotapi.NewMessage(channelIDInt, messageText)
+	msg.ParseMode = tgbotapi.ModeMarkdown
+
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Error: Failed to send message to channel %d: %v", channelIDInt, err)
 		http.Error(w, `{"error":"Failed to send message"}`, http.StatusInternalServerError)
 		return
 	}
@@ -140,19 +122,102 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	
 	// Возвращаем успешный ответ
 	w.WriteHeader(http.StatusOK)
-	response := `{"status":"success","message":"Webhook processed successfully","duration_ms":` + strconv.FormatInt(duration.Milliseconds(), 10) + `}`
+	response := fmt.Sprintf(`{"status":"success","message":"Webhook processed successfully","duration_ms":%d}`, duration.Milliseconds())
 	w.Write([]byte(response))
 	
 	log.Printf("Webhook processed successfully in %v for client %s", duration, getClientIP(r))
 }
 
+// validateWebhookSignature проверяет подпись webhook
+func validateWebhookSignature(body []byte, signature string, secret string) error {
+	if signature == "" {
+		return fmt.Errorf("webhook signature required")
+	}
+
+	// Убираем префикс "sha256=" если он есть
+	signature = strings.TrimPrefix(signature, "sha256=")
+
+	// Вычисляем ожидаемую подпись
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expectedSignature := hex.EncodeToString(mac.Sum(nil))
+
+	// Сравниваем подписи безопасным способом
+	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
+		return fmt.Errorf("invalid webhook signature")
+	}
+
+	return nil
+}
+
+// sanitizeLogData маскирует чувствительные данные для логирования
+func sanitizeLogData(data string) string {
+	sensitiveKeys := []string{
+		"token", "password", "secret", "key", "authorization",
+		"api_key", "access_token", "refresh_token", "jwt",
+	}
+
+	sanitized := data
+	
+	for _, key := range sensitiveKeys {
+		patterns := []string{
+			fmt.Sprintf(`"%s":"[^"]*"`, key),
+			fmt.Sprintf(`"%s":\s*"[^"]*"`, key),
+		}
+		
+		for _, pattern := range patterns {
+			sanitized = strings.ReplaceAll(sanitized, pattern, fmt.Sprintf(`"%s":"***MASKED***"`, key))
+		}
+	}
+
+	// Ограничиваем длину для логов
+	if len(sanitized) > 500 {
+		sanitized = sanitized[:500] + "...[TRUNCATED]"
+	}
+
+	return sanitized
+}
+
+// processWebhook обрабатывает входящий webhook и возвращает сообщение для отправки
+func processWebhook(rawData []byte) string {
+	// Попробуем распарсить как JSON объект
+	var jsonData map[string]interface{}
+	if err := json.Unmarshal(rawData, &jsonData); err == nil {
+		return formatJSONMessage(jsonData)
+	}
+
+	// В крайнем случае, отправим как есть
+	return fmt.Sprintf("📝 **Webhook данные**\n\n```\n%s\n```", string(rawData))
+}
+
+// formatJSONMessage форматирует произвольный JSON
+func formatJSONMessage(data map[string]interface{}) string {
+	var builder strings.Builder
+
+	builder.WriteString("📦 **Webhook данные**\n\n")
+
+	for key, value := range data {
+		switch key {
+		case "event", "type", "action":
+			builder.WriteString(fmt.Sprintf("**Событие:** %v\n", value))
+		case "timestamp", "time", "created_at":
+			builder.WriteString(fmt.Sprintf("**Время:** %v\n", value))
+		case "user", "username", "author":
+			builder.WriteString(fmt.Sprintf("**Пользователь:** %v\n", value))
+		case "message", "description", "text":
+			builder.WriteString(fmt.Sprintf("**Сообщение:** %v\n", value))
+		default:
+			builder.WriteString(fmt.Sprintf("**%s:** %v\n", key, value))
+		}
+	}
+
+	return builder.String()
+}
+
 // getClientIP безопасно получает IP клиента
 func getClientIP(r *http.Request) string {
-	// Проверяем заголовки в порядке приоритета
 	clientIP := r.Header.Get("X-Forwarded-For")
 	if clientIP != "" {
-		// X-Forwarded-For может содержать несколько IP через запятую
-		// Берем первый (оригинальный клиент)
 		if idx := strings.Index(clientIP, ","); idx != -1 {
 			clientIP = clientIP[:idx]
 		}
@@ -164,11 +229,10 @@ func getClientIP(r *http.Request) string {
 		return clientIP
 	}
 
-	clientIP = r.Header.Get("CF-Connecting-IP") // Cloudflare
+	clientIP = r.Header.Get("CF-Connecting-IP")
 	if clientIP != "" {
 		return clientIP
 	}
 
-	// Fallback к RemoteAddr
 	return r.RemoteAddr
 } 

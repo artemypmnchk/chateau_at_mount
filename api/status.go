@@ -4,19 +4,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 
-	"chateau-bot/pkg/config"
-	"chateau-bot/pkg/telegram"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // StatusResponse структура ответа статуса
 type StatusResponse struct {
-	Status    string                 `json:"status"`
-	BotInfo   map[string]interface{} `json:"bot_info,omitempty"`
-	Config    map[string]interface{} `json:"config,omitempty"`
-	Error     string                 `json:"error,omitempty"`
-	Timestamp string                 `json:"timestamp"`
-	WebhookURL string                `json:"webhook_url"`
+	Status     string                 `json:"status"`
+	BotInfo    map[string]interface{} `json:"bot_info,omitempty"`
+	Config     map[string]interface{} `json:"config,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	WebhookURL string                 `json:"webhook_url"`
 }
 
 // Status обрабатывает запросы статуса бота
@@ -26,29 +25,23 @@ func Status(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	response := StatusResponse{
-		Timestamp:  "2024-01-01T00:00:00Z", // В реальности используйте time.Now()
-		WebhookURL: r.Host + "/api/webhook",
+		WebhookURL: "https://" + r.Host + "/api/webhook",
 	}
 
-	// Загружаем конфигурацию
-	cfg, err := config.Load()
-	if err != nil {
-		response.Status = "error"
-		response.Error = "Configuration error: " + err.Error()
-		writeJSONResponse(w, response, http.StatusInternalServerError)
-		return
-	}
+	// Получаем переменные окружения
+	telegramToken := os.Getenv("TELEGRAM_TOKEN")
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+	channelID := os.Getenv("DEFAULT_CHANNEL_ID")
 
 	// Проверяем конфигурацию
 	response.Config = map[string]interface{}{
-		"has_telegram_token": cfg.TelegramToken != "",
-		"has_webhook_secret": cfg.WebhookSecret != "",
-		"default_channel_id": cfg.DefaultChannelID,
-		"allowed_channels_count": len(cfg.AllowedChannels),
+		"has_telegram_token": telegramToken != "",
+		"has_webhook_secret": webhookSecret != "",
+		"default_channel_id": channelID,
 	}
 
 	// Если токен не задан, возвращаем ошибку
-	if cfg.TelegramToken == "" {
+	if telegramToken == "" {
 		response.Status = "error"
 		response.Error = "Telegram token not configured"
 		writeJSONResponse(w, response, http.StatusInternalServerError)
@@ -56,7 +49,7 @@ func Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Создаем клиент и получаем информацию о боте
-	tgClient, err := telegram.NewClient(cfg.TelegramToken)
+	bot, err := tgbotapi.NewBotAPI(telegramToken)
 	if err != nil {
 		response.Status = "error"
 		response.Error = "Failed to create Telegram client: " + err.Error()
@@ -65,7 +58,7 @@ func Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Получаем информацию о боте
-	botInfo, err := tgClient.GetMe()
+	botInfo, err := bot.GetMe()
 	if err != nil {
 		response.Status = "error"
 		response.Error = "Failed to get bot info: " + err.Error()
