@@ -1,12 +1,7 @@
 {
-  "routes": [
-    {
-      "src": "/api/webhook",
-      "dest": "/api/webhook.go"
-    },
-    {
-      "src": "/api/status", 
-      "dest": "/api/status.go"
+  "build": {
+    "env": {
+      "GO_VERSION": "1.21"
     }
-  ]
+  }
 } 
