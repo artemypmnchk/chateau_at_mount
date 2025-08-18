@@ -45,7 +45,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	// Получаем переменные окружения
 	telegramToken := os.Getenv("TELEGRAM_TOKEN")
 	webhookSecret := os.Getenv("WEBHOOK_SECRET")
-	channelID := os.Getenv("DEFAULT_CHANNEL_ID")
+	channelID := os.Getenv("TELEGRAM_CHANNEL_ID")
 
 	if telegramToken == "" {
 		log.Printf("Security: Telegram token not configured")
