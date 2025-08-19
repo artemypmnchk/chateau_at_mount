@@ -254,7 +254,7 @@ func formatContactForm(data map[string]interface{}) string {
 	var builder strings.Builder
 	
 	builder.WriteString("📞 **НОВАЯ ЗАЯВКА - ОБРАТНАЯ СВЯЗЬ**\n")
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 	
 	if name := getFieldValue(data, "Name", "name"); name != "" {
 		builder.WriteString(fmt.Sprintf("👤 **Имя:** %s\n", name))
@@ -280,7 +280,7 @@ func formatBookingForm(data map[string]interface{}) string {
 	var builder strings.Builder
 	
 	builder.WriteString("🎪 **ЗАЯВКА НА ФЕСТИВАЛЬ**\n")
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 	
 	if name := getFieldValue(data, "Name", "name"); name != "" {
 		builder.WriteString(fmt.Sprintf("👤 **Имя:** %s\n", name))
@@ -302,7 +302,7 @@ func formatSubscriptionForm(data map[string]interface{}) string {
 	var builder strings.Builder
 	
 	builder.WriteString("📧 **НОВАЯ ПОДПИСКА**\n")
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 	
 	if name := getFieldValue(data, "Name", "name"); name != "" {
 		builder.WriteString(fmt.Sprintf("👤 **Имя:** %s\n", name))
@@ -320,7 +320,7 @@ func formatGenericForm(data map[string]interface{}) string {
 	var builder strings.Builder
 	
 	builder.WriteString("📋 **НОВЫЕ ДАННЫЕ**\n")
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 	
 	for key, value := range data {
 		if value != nil && fmt.Sprintf("%v", value) != "" {
