@@ -12,7 +12,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -102,12 +101,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	messageText := processWebhook(body)
 
 	// Конвертируем ID канала в int64
+	log.Printf("Debug: Channel ID string: '%s'", channelID)
 	channelIDInt, err := strconv.ParseInt(channelID, 10, 64)
 	if err != nil {
 		log.Printf("Error: Failed to parse channel ID: %v", err)
 		http.Error(w, `{"error":"Invalid channel configuration"}`, http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Debug: Channel ID int64: %d", channelIDInt)
 
 	// Отправляем сообщение в Telegram
 	msg := tgbotapi.NewMessage(channelIDInt, messageText)
@@ -191,28 +192,157 @@ func processWebhook(rawData []byte) string {
 	return fmt.Sprintf("📝 **Webhook данные**\n\n```\n%s\n```", string(rawData))
 }
 
-// formatJSONMessage форматирует произвольный JSON
+// formatJSONMessage форматирует произвольный JSON с красивым дизайном
 func formatJSONMessage(data map[string]interface{}) string {
+	// Определяем тип формы по полям
+	formType := detectFormType(data)
+	
+	switch formType {
+	case "contact":
+		return formatContactForm(data)
+	case "booking":
+		return formatBookingForm(data)
+	case "subscription":
+		return formatSubscriptionForm(data)
+	default:
+		return formatGenericForm(data)
+	}
+}
+
+// detectFormType определяет тип формы по наличию полей
+func detectFormType(data map[string]interface{}) string {
+	hasQuestion := hasField(data, "question")
+	hasPhoneNumber := hasField(data, "PhoneNumber") || hasField(data, "phone")
+	hasEmailTg := hasField(data, "email/tgname")
+	
+	hasVisitors := hasField(data, "NumberOfVisitors")
+	hasPhoneTg := hasField(data, "Phone/Tg")
+	
+	hasEmail := hasField(data, "Email") || hasField(data, "email")
+	
+	// Форма обратной связи/вопросов
+	if hasQuestion && (hasPhoneNumber || hasEmailTg) {
+		return "contact"
+	}
+	
+	// Форма бронирования
+	if hasVisitors && hasPhoneTg {
+		return "booking"
+	}
+	
+	// Форма подписки
+	if hasEmail && !hasQuestion && !hasVisitors {
+		return "subscription"
+	}
+	
+	return "generic"
+}
+
+// hasField проверяет наличие поля (регистронезависимо)
+func hasField(data map[string]interface{}, field string) bool {
+	for key := range data {
+		if strings.EqualFold(key, field) {
+			return true
+		}
+	}
+	return false
+}
+
+// formatContactForm форматирует форму обратной связи
+func formatContactForm(data map[string]interface{}) string {
 	var builder strings.Builder
+	
+	builder.WriteString("📞 **НОВАЯ ЗАЯВКА - ОБРАТНАЯ СВЯЗЬ**\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	
+	if name := getFieldValue(data, "Name", "name"); name != "" {
+		builder.WriteString(fmt.Sprintf("👤 **Имя:** %s\n", name))
+	}
+	
+	if phone := getFieldValue(data, "PhoneNumber", "phone"); phone != "" {
+		builder.WriteString(fmt.Sprintf("📱 **Телефон:** %s\n", phone))
+	}
+	
+	if contact := getFieldValue(data, "email/tgname", "email", "telegram"); contact != "" {
+		builder.WriteString(fmt.Sprintf("✉️ **Email/Telegram:** %s\n", contact))
+	}
+	
+	if question := getFieldValue(data, "question", "message", "text"); question != "" {
+		builder.WriteString(fmt.Sprintf("\n💬 **Вопрос:**\n_%s_\n", question))
+	}
+	
+	return builder.String()
+}
 
-	builder.WriteString("📦 **Webhook данные**\n\n")
+// formatBookingForm форматирует форму бронирования
+func formatBookingForm(data map[string]interface{}) string {
+	var builder strings.Builder
+	
+	builder.WriteString("🎪 **ЗАЯВКА НА ФЕСТИВАЛЬ**\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	
+	if name := getFieldValue(data, "Name", "name"); name != "" {
+		builder.WriteString(fmt.Sprintf("👤 **Имя:** %s\n", name))
+	}
+	
+	if visitors := getFieldValue(data, "NumberOfVisitors", "visitors"); visitors != "" {
+		builder.WriteString(fmt.Sprintf("👥 **Количество гостей:** %s\n", visitors))
+	}
+	
+	if contact := getFieldValue(data, "Phone/Tg", "phone", "telegram"); contact != "" {
+		builder.WriteString(fmt.Sprintf("📞 **Контакт:** %s\n", contact))
+	}
+	
+	return builder.String()
+}
 
+// formatSubscriptionForm форматирует форму подписки
+func formatSubscriptionForm(data map[string]interface{}) string {
+	var builder strings.Builder
+	
+	builder.WriteString("📧 **НОВАЯ ПОДПИСКА**\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	
+	if name := getFieldValue(data, "Name", "name"); name != "" {
+		builder.WriteString(fmt.Sprintf("👤 **Имя:** %s\n", name))
+	}
+	
+	if email := getFieldValue(data, "Email", "email"); email != "" {
+		builder.WriteString(fmt.Sprintf("✉️ **Email:** %s\n", email))
+	}
+	
+	return builder.String()
+}
+
+// formatGenericForm форматирует неизвестный тип формы
+func formatGenericForm(data map[string]interface{}) string {
+	var builder strings.Builder
+	
+	builder.WriteString("📋 **НОВЫЕ ДАННЫЕ**\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	
 	for key, value := range data {
-		switch key {
-		case "event", "type", "action":
-			builder.WriteString(fmt.Sprintf("**Событие:** %v\n", value))
-		case "timestamp", "time", "created_at":
-			builder.WriteString(fmt.Sprintf("**Время:** %v\n", value))
-		case "user", "username", "author":
-			builder.WriteString(fmt.Sprintf("**Пользователь:** %v\n", value))
-		case "message", "description", "text":
-			builder.WriteString(fmt.Sprintf("**Сообщение:** %v\n", value))
-		default:
+		if value != nil && fmt.Sprintf("%v", value) != "" {
 			builder.WriteString(fmt.Sprintf("**%s:** %v\n", key, value))
 		}
 	}
-
+	
 	return builder.String()
+}
+
+// getFieldValue получает значение поля (регистронезависимо)
+func getFieldValue(data map[string]interface{}, fields ...string) string {
+	for _, field := range fields {
+		for key, value := range data {
+			if strings.EqualFold(key, field) && value != nil {
+				str := fmt.Sprintf("%v", value)
+				if str != "" {
+					return str
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // getClientIP безопасно получает IP клиента
